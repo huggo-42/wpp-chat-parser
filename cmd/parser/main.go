@@ -61,7 +61,7 @@ func main() {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error trying to open file '%s': %v\n", filePath, err)
+		fmt.Fprintf(os.Stderr, "Error trying to open file '%s': %v\n", filePath, err)
 		os.Exit(1)
 	}
 	defer file.Close()
