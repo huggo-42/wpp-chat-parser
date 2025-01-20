@@ -11,86 +11,92 @@ import (
 )
 
 type Message struct {
-	sender   string
-	message  string
-	dateTime string
+	Sender   string
+	Message  string
+	DateTime string
 }
 
-/*
- * isNewMessage is needed because of multiline messages
- * isNewMessage checks if a line has the following format
- * 7/2/22, 6:50 AM - User Name: message
- * by removing all spaces and testing against `isMessageRe` regex
- */
+// isNewMessage verifies if a line is the beginning of a new message.
 func isNewMessage(line string) bool {
-	spacesRe := regexp.MustCompile(`\p{Zs}`)
-	line = spacesRe.ReplaceAllString(line, "")
-	var isMessageRe = `(?m)^\d{1,2}\/\d{1,2}\/\d{2},\d{1,2}:\d{2}\s?(AM|PM)?-[\w\s]+:.+$`
-	match, _ := regexp.MatchString(isMessageRe, line)
+	spacesRegex := regexp.MustCompile(`\p{Zs}`)
+	line = spacesRegex.ReplaceAllString(line, "")
+	isMessageRegex := `(?m)^\d{1,2}\/\d{1,2}\/\d{2},\d{1,2}:\d{2}\s?(AM|PM)?-[\w\s]+:.+$`
+	match, _ := regexp.MatchString(isMessageRegex, line)
 	return match
 }
 
-/*
- * extractMessageFromLine parses a line
- * and returns a Message struct
- */
-func extractMessageFromLine(line string) Message {
-	parts := strings.Split(line, " - ")
+// extractMessageFromLine analyzes a line and returns a Message struct
+func extractMessageFromLine(line string) (Message, error) {
+	parts := strings.SplitN(line, " - ", 2)
+	if len(parts) < 2 {
+		return Message{}, fmt.Errorf("malformed line: %s", line)
+	}
 	dateTime := parts[0]
-	senderAndMessage := strings.Split(parts[1], ": ")
-	sender := senderAndMessage[0]
-	message := senderAndMessage[1]
-	return Message{sender, message, dateTime}
+	senderAndMessage := strings.SplitN(parts[1], ": ", 2)
+	if len(senderAndMessage) < 2 {
+		return Message{}, fmt.Errorf("malformed line (no sender or message): %s", line)
+	}
+	return Message{
+		Sender:   senderAndMessage[0],
+		Message:  senderAndMessage[1],
+		DateTime: dateTime,
+	}, nil
 }
 
 func main() {
+	var filePath string
+	flag.StringVar(&filePath, "file", "", "Path to the file to be processed")
+
 	flag.Usage = func() {
 		fmt.Println("WhatsApp chat parser.")
 		fmt.Println()
-		fmt.Println("-file                     Provide the path to the file to process")
+		fmt.Println("-file                     Provide the path to the file to analyzed")
 	}
-	filePath := flag.String("file", "", "Path to the file to process")
+
 	flag.Parse()
-	if *filePath == "" {
-		fmt.Print("Error: -file flag is required\n")
+	if filePath == "" {
+		fmt.Fprintln(os.Stderr, "Error: The -file parameter is required.")
 		os.Exit(1)
 	}
-	file, err := os.Open(*filePath)
+
+	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Println("Failed to open file at", *filePath)
-		fmt.Println("Error:", err)
+		fmt.Fprintln(os.Stderr, "Error trying to open file '%s': %v\n", filePath, err)
 		os.Exit(1)
 	}
 	defer file.Close()
+
 	scanner := bufio.NewReader(file)
 	var currentMessage Message
-	var currentText string
-	messageHandler := func() {
-		fmt.Printf("Message: %s\n", currentMessage)
-	}
-	performActionOnEachMessage := func() {
-		messageHandler()
-		if currentText != "" {
-			currentMessage.message = strings.TrimSpace(currentText)
-			currentText = ""
+	var currentText strings.Builder
+
+	processMessage := func() {
+		if currentText.Len() > 0 {
+			currentMessage.Message = strings.TrimSpace(currentText.String())
+			fmt.Printf("Date/Time: %s\nSender: %s\nMessage: %s\n\n", currentMessage.DateTime, currentMessage.Sender, currentMessage.Message)
+			currentText.Reset()
 		}
 	}
 	for {
 		line, err := scanner.ReadString('\n')
+		line = strings.TrimSpace(line)
 		if err != nil {
 			if err == io.EOF {
-				performActionOnEachMessage()
-				fmt.Print("Parsed the whole file.\n")
-				os.Exit(1)
+				processMessage()
+				break
 			}
-			os.Exit(1)
+			fmt.Fprintf(os.Stderr, "Erro ao ler linha: %v\n", err)
+			break
 		}
 		if isNewMessage(line) {
-			performActionOnEachMessage()
-			currentMessage = extractMessageFromLine(line)
-			currentText = currentMessage.message
+			processMessage()
+			currentMessage, err = extractMessageFromLine(line)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error analyzing line: %v\n", err)
+			}
 			continue
 		}
-		currentText += line
+		currentText.WriteString(line + "\n")
 	}
+	fmt.Println("File processed successfully.")
 }
